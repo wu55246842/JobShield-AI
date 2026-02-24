@@ -10,16 +10,17 @@ from app.db.session import get_db
 from app.models.tables import Agent, Assessment, OnetCache, ToolCatalog, ToolEmbedding
 from app.schemas.agent import AgentGenerateRequest, ApifyWebhookPayload
 from app.schemas.rag import RagSearchRequest, RagSearchResponse
-from app.schemas.risk import RiskEvaluateRequest, RiskEvaluateResponse
+from app.schemas.risk import RiskBreakdownItem, RiskEvaluateRequest, RiskEvaluateResponse
 from app.services.agent import build_agent_config
 from app.services.onet import OnetClient
 from app.services.rag import embed_query, search_tools
-from app.services.risk import evaluate_risk_v0
+from app.core.gsti_router import GSTIRouter
 from app.utils.auth import require_ingest_api_key
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 onet_client = OnetClient()
+gsti_router = GSTIRouter()
 
 
 def err(code: str, message: str, details: dict | None = None):
@@ -57,14 +58,41 @@ async def onet_tasks(code: str):
 
 @router.post("/risk/evaluate", response_model=RiskEvaluateResponse)
 async def risk_evaluate(body: RiskEvaluateRequest, db: AsyncSession = Depends(get_db)):
-    tasks = []
+    tasks: list[str] = []
+    onet_payload: dict = {}
     if body.occupation_code:
         try:
-            payload = await onet_client.get(f"online/occupations/{body.occupation_code}/summary")
-            tasks = [t.get("task", "") for t in payload.get("task_statements", [])]
+            summary_payload = await onet_client.get(f"online/occupations/{body.occupation_code}/summary")
+            tasks = [t.get("task", "") for t in summary_payload.get("task_statements", []) if t.get("task")]
+            onet_payload["summary"] = summary_payload
         except Exception:
             tasks = body.user_inputs.tasks_preference
-    score, breakdown, summary, focus = evaluate_risk_v0(tasks, body.user_inputs.model_dump())
+
+        try:
+            detail_payload = await onet_client.get(f"online/occupations/{body.occupation_code}")
+            onet_payload["detail"] = detail_payload
+        except Exception:
+            pass
+
+    if not tasks:
+        tasks = body.user_inputs.tasks_preference
+
+    result = gsti_router.evaluate(
+        tasks=tasks,
+        onet_payload=onet_payload,
+        model_version=body.model_version,
+        context={
+            "industry": body.user_inputs.industry,
+            "region": body.user_inputs.region,
+            "selected_tools": body.user_inputs.selected_tools,
+            "occupation_code": body.occupation_code,
+            "occupation_title": body.occupation_title,
+        },
+    )
+
+    score = result["score"]
+    summary = result["summary"]
+    breakdown = [RiskBreakdownItem(**item) for item in result["breakdown"]]
     assessment = Assessment(
         session_id=body.session_id,
         occupation_code=body.occupation_code,
@@ -76,7 +104,15 @@ async def risk_evaluate(body: RiskEvaluateRequest, db: AsyncSession = Depends(ge
     db.add(assessment)
     await db.commit()
     await db.refresh(assessment)
-    return RiskEvaluateResponse(score=score, breakdown=breakdown, summary=summary, suggested_focus=focus, assessment_id=assessment.id)
+    return RiskEvaluateResponse(
+        score=score,
+        confidence=result.get("confidence"),
+        model_version=result.get("model_version"),
+        breakdown=breakdown,
+        summary=summary,
+        suggested_focus=result["suggested_focus"],
+        assessment_id=assessment.id,
+    )
 
 
 @router.post("/rag/tools/search", response_model=RagSearchResponse)
