@@ -1,20 +1,18 @@
 from __future__ import annotations
 
 from app.core.calibration import calibrate
+from app.core.config_models import GSTIv1Config
 from app.core.onet_features import extract_onet_numeric_features
 from app.core.semantic_features import extract_semantic_features
 from app.core.trend_adjustment import compute_trend_modifier
 
-
-TOP_LEVEL_WEIGHTS = {
-    "automation_susceptibility": 0.35,
-    "human_advantage": 0.35,
-    "responsibility_constraints": 0.15,
-    "trend_modifier": 0.15,
-}
+DEFAULT_CONFIG = GSTIv1Config()
 
 
 class GSTIv1Engine:
+    def __init__(self, config: GSTIv1Config | None = None) -> None:
+        self.config = config or DEFAULT_CONFIG
+
     def evaluate(
         self,
         tasks: list[str],
@@ -31,6 +29,7 @@ class GSTIv1Engine:
             selected_tools=context.get("selected_tools"),
             occupation_code=context.get("occupation_code"),
             occupation_title=context.get("occupation_title"),
+            config=self.config.trend,
         )
 
         values = {k: v["value"] for k, v in onet_features.items()}
@@ -39,32 +38,33 @@ class GSTIv1Engine:
             return default if v is None else v
 
         auto_sub = {
-            "routine_structured": (n(values.get("routine_structured")), 0.45, onet_features.get("routine_structured", {})),
-            "information_processing": (n(values.get("information_processing")), 0.35, onet_features.get("information_processing", {})),
-            "automation_density": (semantic.get("automation_density") if semantic else None, 0.20, {"source": f"embedding:{semantic.get('model')}" if semantic else "embedding:unavailable"}),
+            "routine_structured": (n(values.get("routine_structured")), self.config.automation_subweights["routine_structured"], onet_features.get("routine_structured", {})),
+            "information_processing": (n(values.get("information_processing")), self.config.automation_subweights["information_processing"], onet_features.get("information_processing", {})),
+            "automation_density": (semantic.get("automation_density") if semantic else None, self.config.automation_subweights["automation_density"], {"source": f"embedding:{semantic.get('model')}" if semantic else "embedding:unavailable"}),
         }
         human_sub = {
-            "empathy_social": (n(values.get("empathy_social")), 0.30, onet_features.get("empathy_social", {})),
-            "creativity_innovation": (n(values.get("creativity_innovation")), 0.25, onet_features.get("creativity_innovation", {})),
-            "leadership_decision": (n(values.get("leadership_decision")), 0.25, onet_features.get("leadership_decision", {})),
-            "human_density": (semantic.get("human_density") if semantic else None, 0.20, {"source": f"embedding:{semantic.get('model')}" if semantic else "embedding:unavailable"}),
+            "empathy_social": (n(values.get("empathy_social")), self.config.human_subweights["empathy_social"], onet_features.get("empathy_social", {})),
+            "creativity_innovation": (n(values.get("creativity_innovation")), self.config.human_subweights["creativity_innovation"], onet_features.get("creativity_innovation", {})),
+            "leadership_decision": (n(values.get("leadership_decision")), self.config.human_subweights["leadership_decision"], onet_features.get("leadership_decision", {})),
+            "human_density": (semantic.get("human_density") if semantic else None, self.config.human_subweights["human_density"], {"source": f"embedding:{semantic.get('model')}" if semantic else "embedding:unavailable"}),
         }
         resp_sub = {
-            "safety_compliance": (n(values.get("safety_compliance")), 0.55, onet_features.get("safety_compliance", {})),
-            "physical_field_work": (n(values.get("physical_field_work")), 0.45, onet_features.get("physical_field_work", {})),
+            "safety_compliance": (n(values.get("safety_compliance")), self.config.responsibility_subweights["safety_compliance"], onet_features.get("safety_compliance", {})),
+            "physical_field_work": (n(values.get("physical_field_work")), self.config.responsibility_subweights["physical_field_work"], onet_features.get("physical_field_work", {})),
         }
 
         auto_val, auto_breakdown = self._compose_subfactors(auto_sub)
         human_val, human_breakdown = self._compose_subfactors(human_sub)
         resp_val, resp_breakdown = self._compose_subfactors(resp_sub)
 
+        top = self.config.top_level_weights
         factors = [
-            self._factor_item("automation_susceptibility", "positive", TOP_LEVEL_WEIGHTS["automation_susceptibility"], auto_val, auto_breakdown),
-            self._factor_item("human_advantage", "negative", TOP_LEVEL_WEIGHTS["human_advantage"], human_val, human_breakdown),
-            self._factor_item("responsibility_constraints", "negative", TOP_LEVEL_WEIGHTS["responsibility_constraints"], resp_val, resp_breakdown),
+            self._factor_item("automation_susceptibility", "positive", top["automation_susceptibility"], auto_val, auto_breakdown),
+            self._factor_item("human_advantage", "negative", top["human_advantage"], human_val, human_breakdown),
+            self._factor_item("responsibility_constraints", "negative", top["responsibility_constraints"], resp_val, resp_breakdown),
             {
                 "factor": "trend_modifier",
-                "weight": TOP_LEVEL_WEIGHTS["trend_modifier"],
+                "weight": top["trend_modifier"],
                 "direction": "bidirectional",
                 "value": round(trend["value"], 4),
                 "risk_contribution": round(trend["value"] * 100, 4),
@@ -74,13 +74,13 @@ class GSTIv1Engine:
         ]
 
         raw_risk = (
-            TOP_LEVEL_WEIGHTS["automation_susceptibility"] * auto_val
-            + TOP_LEVEL_WEIGHTS["human_advantage"] * (1 - human_val)
-            + TOP_LEVEL_WEIGHTS["responsibility_constraints"] * (1 - resp_val)
+            top["automation_susceptibility"] * auto_val
+            + top["human_advantage"] * (1 - human_val)
+            + top["responsibility_constraints"] * (1 - resp_val)
             + trend["value"]
         )
         raw_risk = max(0.0, min(1.0, raw_risk))
-        calibrated = calibrate(raw_risk)
+        calibrated = calibrate(raw_risk, config=self.config.calibration)
 
         score = round(calibrated * 100, 2)
         confidence = self._confidence(tasks, onet_features)

@@ -1,14 +1,32 @@
 from __future__ import annotations
 
+from app.core.config_models import GSTIConfig
+from app.core.gsti_v0 import DEFAULT_CONFIG as V0_DEFAULT_CONFIG
 from app.core.gsti_v0 import GSTIv0Engine
+from app.core.gsti_v1 import DEFAULT_CONFIG as V1_DEFAULT_CONFIG
 from app.core.gsti_v1 import GSTIv1Engine
 from app.core.onet_features import extract_onet_numeric_features
 
+DEFAULT_CONFIG = GSTIConfig(v0=V0_DEFAULT_CONFIG, v1=V1_DEFAULT_CONFIG)
+
 
 class GSTIRouter:
-    def __init__(self) -> None:
-        self.v0 = GSTIv0Engine()
-        self.v1 = GSTIv1Engine()
+    def __init__(self, config: GSTIConfig | None = None) -> None:
+        self.config = config or DEFAULT_CONFIG
+        self.v0 = GSTIv0Engine(config=self.config.v0)
+        self.v1 = GSTIv1Engine(config=self.config.v1)
+
+    @classmethod
+    def from_params(cls, params: dict | None = None) -> "GSTIRouter":
+        if not params:
+            return cls()
+        merged = DEFAULT_CONFIG.model_dump()
+        for key, value in params.items():
+            if isinstance(value, dict) and isinstance(merged.get(key), dict):
+                merged[key] = {**merged[key], **value}
+            else:
+                merged[key] = value
+        return cls(config=GSTIConfig.model_validate(merged))
 
     def evaluate(
         self,

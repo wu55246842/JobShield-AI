@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     embedding_model: str = "text-embedding-3-small"
 
     ingest_api_key: str = "change-me"
+    admin_api_key: str = "admin-change-me"
     request_timeout_s: float = 20.0
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")

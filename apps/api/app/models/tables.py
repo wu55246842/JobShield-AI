@@ -58,3 +58,46 @@ class OnetCache(Base):
     occupation_code: Mapped[str] = mapped_column(String(32), unique=True)
     payload: Mapped[dict] = mapped_column(JSON)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class Label(Base):
+    __tablename__ = "labels"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    assessment_id: Mapped[int] = mapped_column(ForeignKey("assessments.id", ondelete="CASCADE"), index=True)
+    rater: Mapped[str] = mapped_column(Text)
+    label_type: Mapped[str] = mapped_column(Text, default="risk_score")
+    risk_score_label: Mapped[float | None] = mapped_column(Float, nullable=True)
+    confidence_label: Mapped[float | None] = mapped_column(Float, nullable=True)
+    factor_overrides: Mapped[dict] = mapped_column(JSON, default=dict)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Experiment(Base):
+    __tablename__ = "experiments"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(Text, unique=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    model_version: Mapped[str] = mapped_column(Text)
+    params: Mapped[dict] = mapped_column(JSON)
+    is_active: Mapped[bool] = mapped_column(default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ExperimentAssignment(Base):
+    __tablename__ = "experiment_assignments"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_key: Mapped[str] = mapped_column(Text, index=True)
+    experiment_id: Mapped[int] = mapped_column(ForeignKey("experiments.id", ondelete="CASCADE"))
+    variant: Mapped[str] = mapped_column(Text)
+    assigned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ExperimentRun(Base):
+    __tablename__ = "experiment_runs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    experiment_id: Mapped[int] = mapped_column(ForeignKey("experiments.id", ondelete="CASCADE"), index=True)
+    assessment_id: Mapped[int] = mapped_column(ForeignKey("assessments.id", ondelete="CASCADE"), index=True)
+    variant: Mapped[str] = mapped_column(Text)
+    output: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

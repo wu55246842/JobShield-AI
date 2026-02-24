@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.core.config_models import GSTIv0Config
 
-FACTOR_CONFIG = {
+
+DEFAULT_FACTOR_CONFIG = {
     "routine_structured": {
         "weight": 0.22,
         "direction": "positive",
@@ -91,10 +93,7 @@ FACTOR_CONFIG = {
     },
 }
 
-# TODO v1:
-# - 接入 O*NET structured work context numeric scores
-# - 使用 NLP embedding 相似度代替简单关键词
-# - 根据行业动态调整权重
+DEFAULT_CONFIG = GSTIv0Config(factors=DEFAULT_FACTOR_CONFIG)
 
 
 @dataclass
@@ -105,17 +104,20 @@ class _FactorObservation:
 
 
 class GSTIv0Engine:
+    def __init__(self, config: GSTIv0Config | None = None) -> None:
+        self.config = config or DEFAULT_CONFIG
+
     def extract_factor_scores(self, tasks: list[str]) -> dict[str, dict[str, float | int]]:
         if not tasks:
             return {
                 factor: {"raw_value": 0.0, "matched_keywords": 0, "total_tasks": 0}
-                for factor in FACTOR_CONFIG
+                for factor in self.config.factors
             }
 
         normalized_tasks = [task.lower() for task in tasks]
         observations: dict[str, dict[str, float | int]] = {}
-        for factor, config in FACTOR_CONFIG.items():
-            keywords = config["keywords"]
+        for factor, config in self.config.factors.items():
+            keywords = config.keywords
             matched_keywords = sum(
                 1
                 for task in normalized_tasks
@@ -141,9 +143,9 @@ class GSTIv0Engine:
         breakdown = []
         risk_sum = 0.0
 
-        for factor, config in FACTOR_CONFIG.items():
-            weight = config["weight"]
-            direction = config["direction"]
+        for factor, config in self.config.factors.items():
+            weight = config.weight
+            direction = config.direction
             obs = _FactorObservation(**observations[factor])
 
             if direction == "positive":
