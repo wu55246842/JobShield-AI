@@ -15,6 +15,9 @@ class RiskEvaluateRequest(BaseModel):
     user_inputs: UserInputs
     session_id: str = "anon"
     model_version: str = "auto"
+    experiment_id: int | None = None
+    variant: str | None = None
+    user_key: str | None = None
 
 
 class RiskSubfactorItem(BaseModel):
@@ -47,3 +50,4 @@ class RiskEvaluateResponse(BaseModel):
     summary: str
     suggested_focus: list[str]
     assessment_id: int | None = None
+    experiment: dict | None = None
